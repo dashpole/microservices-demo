@@ -16,9 +16,12 @@ require (
 	github.com/sirupsen/logrus v1.4.2
 	github.com/uber/jaeger-client-go v2.21.1+incompatible // indirect
 	go.opencensus.io v0.22.4
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.13.0
+	go.opentelemetry.io/contrib/propagators v0.13.0
 	go.opentelemetry.io/otel v0.13.0
 	go.opentelemetry.io/otel/sdk v0.13.0
 	golang.org/x/net v0.0.0-20200707034311-ab3426394381
 	google.golang.org/grpc v1.32.0
 )
+
 replace go.opencensus.io => github.com/dashpole/opencensus-go v0.22.5-0.20201014173909-bca9ab0ac47e
