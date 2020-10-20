@@ -36,6 +36,11 @@ import (
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/checkoutservice/genproto"
 	money "github.com/GoogleCloudPlatform/microservices-demo/src/checkoutservice/money"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	stackdrivertrace "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
+	"github.com/dashpole/opencensus-migration-go/migration"
+	"go.opentelemetry.io/otel/api/global"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 const (
@@ -150,17 +155,41 @@ func initStats(exporter *stackdriver.Exporter) {
 	}
 }
 
+type custom struct{}
+
+func (c *custom) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if p.Name == "google.devtools.cloudtrace.v2.TraceService.BatchWriteSpans" {
+		return sdktrace.SamplingResult{Decision: sdktrace.Drop}
+	}
+	return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample}
+}
+
+func (c *custom) Description() string {
+	return "sampler that ignores google cloud batch write spans"
+}
+
 func initStackdriverTracing() {
 	// TODO(ahmetb) this method is duplicated in other microservices using Go
 	// since they are not sharing packages.
+	otExporter, err := stackdrivertrace.NewExporter()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithConfig(sdktrace.Config{DefaultSampler: &custom{}}),
+		sdktrace.WithBatcher(otExporter))
+	global.SetTracerProvider(tp)
+	log.Info("registered Stackdriver tracing")
+
+	log.Info("Making OpenCensus libraries write traces using OpenTelemetry...")
+	trace.DefaultTracer = migration.NewTracer()
+
 	for i := 1; i <= 3; i++ {
 		exporter, err := stackdriver.NewExporter(stackdriver.Options{})
 		if err != nil {
 			log.Infof("failed to initialize stackdriver exporter: %+v", err)
 		} else {
-			trace.RegisterExporter(exporter)
-			log.Info("registered Stackdriver tracing")
-
 			// Register the views to collect server stats.
 			initStats(exporter)
 			return

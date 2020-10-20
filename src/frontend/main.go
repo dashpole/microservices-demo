@@ -33,6 +33,11 @@ import (
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/trace"
 	"google.golang.org/grpc"
+
+	stackdrivertrace "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
+	"github.com/dashpole/opencensus-migration-go/migration"
+	"go.opentelemetry.io/otel/api/global"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 const (
@@ -192,27 +197,48 @@ func initStats(log logrus.FieldLogger, exporter *stackdriver.Exporter) {
 	}
 }
 
+type custom struct{}
+
+func (c *custom) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if p.Name == "google.devtools.cloudtrace.v2.TraceService.BatchWriteSpans" {
+		return sdktrace.SamplingResult{Decision: sdktrace.Drop}
+	}
+	return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample}
+}
+
+func (c *custom) Description() string {
+	return "sampler that ignores google cloud batch write spans"
+}
+
 func initStackdriverTracing(log logrus.FieldLogger) {
 	// TODO(ahmetb) this method is duplicated in other microservices using Go
 	// since they are not sharing packages.
+	otExporter, err := stackdrivertrace.NewExporter()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithConfig(sdktrace.Config{DefaultSampler: &custom{}}),
+		sdktrace.WithBatcher(otExporter))
+	global.SetTracerProvider(tp)
+	log.Info("registered Stackdriver tracing")
+
+	log.Info("Making OpenCensus libraries write traces using OpenTelemetry...")
+	trace.DefaultTracer = migration.NewTracer()
+
 	for i := 1; i <= 3; i++ {
 		log = log.WithField("retry", i)
 		exporter, err := stackdriver.NewExporter(stackdriver.Options{})
 		if err != nil {
-			// log.Warnf is used since there are multiple backends (stackdriver & jaeger)
-			// to store the traces. In production setup most likely you would use only one backend.
-			// In that case you should use log.Fatalf.
-			log.Warnf("failed to initialize Stackdriver exporter: %+v", err)
+			log.Infof("failed to initialize stackdriver exporter: %+v", err)
 		} else {
-			trace.RegisterExporter(exporter)
-			log.Info("registered Stackdriver tracing")
-
 			// Register the views to collect server stats.
 			initStats(log, exporter)
 			return
 		}
-		d := time.Second * 20 * time.Duration(i)
-		log.Debugf("sleeping %v to retry initializing Stackdriver exporter", d)
+		d := time.Second * 10 * time.Duration(i)
+		log.Infof("sleeping %v to retry initializing Stackdriver exporter", d)
 		time.Sleep(d)
 	}
 	log.Warn("could not initialize Stackdriver exporter after retrying, giving up")
