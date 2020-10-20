@@ -35,6 +35,7 @@ import (
 
 	stackdrivertrace "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"github.com/dashpole/opencensus-migration-go/migration"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/contrib/propagators/b3"
 	"go.opentelemetry.io/otel/api/global"
@@ -221,7 +222,7 @@ func initStackdriverTracing(log logrus.FieldLogger) {
 	}
 
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithConfig(sdktrace.Config{DefaultSampler: &custom{}}),
+		sdktrace.WithConfig(sdktrace.Config{DefaultSampler: sdktrace.ParentBased(&custom{})}),
 		sdktrace.WithBatcher(otExporter))
 	global.SetTracerProvider(tp)
 	log.Info("registered Stackdriver tracing")
@@ -294,7 +295,8 @@ func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
 	*conn, err = grpc.DialContext(ctx, addr,
 		grpc.WithInsecure(),
 		grpc.WithTimeout(time.Second*3),
-		grpc.WithStatsHandler(&ocgrpc.ClientHandler{}))
+		grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(otelgrpc.WithPropagators(migration.Binary{}))),
+		grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor(otelgrpc.WithPropagators(migration.Binary{}))))
 	if err != nil {
 		panic(errors.Wrapf(err, "grpc: failed to connect %s", addr))
 	}

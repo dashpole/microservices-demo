@@ -38,6 +38,7 @@ import (
 
 	stackdrivertrace "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"github.com/dashpole/opencensus-migration-go/migration"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/api/global"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -91,7 +92,9 @@ func main() {
 	var srv *grpc.Server
 	if os.Getenv("DISABLE_STATS") == "" {
 		log.Info("Stats enabled.")
-		srv = grpc.NewServer(grpc.StatsHandler(&ocgrpc.ServerHandler{}))
+		srv = grpc.NewServer(
+			grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor(otelgrpc.WithPropagators(migration.Binary{}))),
+			grpc.StreamInterceptor(otelgrpc.StreamServerInterceptor(otelgrpc.WithPropagators(migration.Binary{}))))
 	} else {
 		log.Info("Stats disabled.")
 		srv = grpc.NewServer()
@@ -213,7 +216,7 @@ func initStackdriverTracing() {
 	}
 
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithConfig(sdktrace.Config{DefaultSampler: &custom{}}),
+		sdktrace.WithConfig(sdktrace.Config{DefaultSampler: sdktrace.ParentBased(&custom{})}),
 		sdktrace.WithBatcher(otExporter))
 	global.SetTracerProvider(tp)
 	log.Info("registered Stackdriver tracing")
